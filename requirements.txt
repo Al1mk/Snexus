@@ -1,0 +1,8 @@
+python-telegram-bot>=22.0
+pytube>=15.0.0
+yt-dlp>=2025.3.21
+instaloader>=4.14.1
+spotipy>=2.25.1
+mysql-connector-python>=9.2.0
+python-dotenv>=1.0.1
+requests>=2.32.3

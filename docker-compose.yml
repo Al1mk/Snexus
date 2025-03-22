@@ -1,0 +1,36 @@
+version: '3'
+
+services:
+  bot:
+    image: ${DOCKER_USERNAME}/snexus-bot:latest
+    container_name: snexus-bot
+    restart: always
+    volumes:
+      - ./config/.env:/app/config/.env
+      - ./downloads:/app/downloads
+      - ./logs:/app/logs
+    environment:
+      - TZ=Asia/Tehran
+    networks:
+      - snexus-network
+
+  db:
+    image: mysql:8.0
+    container_name: snexus-db
+    restart: always
+    volumes:
+      - mysql-data:/var/lib/mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    networks:
+      - snexus-network
+
+networks:
+  snexus-network:
+    driver: bridge
+
+volumes:
+  mysql-data:
