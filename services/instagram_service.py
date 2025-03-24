@@ -6,6 +6,9 @@ import tempfile
 import subprocess
 import time
 import random
+import socket
+from urllib3.exceptions import ReadTimeoutError, ProtocolError
+from requests.exceptions import RequestException, Timeout, ConnectionError
 from utils.helpers import sanitize_filename, create_download_dir
 from dotenv import load_dotenv
 
@@ -13,6 +16,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Default timeout for requests (in seconds)
+DEFAULT_TIMEOUT = 30
 
 class InstagramDownloader:
     """Service for downloading content from Instagram"""
@@ -41,6 +47,9 @@ class InstagramDownloader:
         # Track failed attempts to implement exponential backoff
         self.failed_attempts = 0
         self.max_retries = 3
+        
+        # Configure socket timeout globally
+        socket.setdefaulttimeout(DEFAULT_TIMEOUT)
     
     def _authenticate(self):
         """Authenticate with Instagram using credentials from environment variables"""
@@ -157,6 +166,12 @@ class InstagramDownloader:
                 logger.info(f"Retrying post download for {post_url}")
                 return self.download_post(post_url, output_dir)
             return None
+        except (RequestException, Timeout, ConnectionError, ReadTimeoutError, ProtocolError) as e:
+            logger.error(f"Network error downloading Instagram post: {e}")
+            if self._handle_rate_limiting("post download"):
+                logger.info(f"Retrying post download after network error for {post_url}")
+                return self.download_post(post_url, output_dir)
+            return None
         except Exception as e:
             logger.error(f"Error downloading Instagram post: {e}")
             return None
@@ -175,6 +190,8 @@ class InstagramDownloader:
             if "?" in shortcode:
                 shortcode = shortcode.split("?")[0]
             
+            logger.info(f"Attempting to download reel with shortcode: {shortcode}")
+            
             # Get post by shortcode
             post = instaloader.Post.from_shortcode(self.loader.context, shortcode)
             
@@ -185,6 +202,7 @@ class InstagramDownloader:
                 
                 # Find downloaded files
                 files = os.listdir(temp_dir)
+                logger.info(f"Downloaded files: {files}")
                 
                 # Get video file
                 video_files = [f for f in files if f.endswith('.mp4')]
@@ -203,7 +221,7 @@ class InstagramDownloader:
                     try:
                         subprocess.run([
                             'ffmpeg', '-i', output_video_path, '-q:a', '0', '-map', 'a', output_audio_path, '-y'
-                        ], check=True, capture_output=True)
+                        ], check=True, capture_output=True, timeout=DEFAULT_TIMEOUT)
                     except Exception as e:
                         logger.error(f"Error extracting audio from reel: {e}")
                         output_audio_path = None
@@ -226,6 +244,12 @@ class InstagramDownloader:
             logger.error(f"Connection error downloading Instagram reel: {e}")
             if self._handle_rate_limiting("reel download"):
                 logger.info(f"Retrying reel download for {reel_url}")
+                return self.download_reel(reel_url, output_dir)
+            return None
+        except (RequestException, Timeout, ConnectionError, ReadTimeoutError, ProtocolError) as e:
+            logger.error(f"Network error downloading Instagram reel: {e}")
+            if self._handle_rate_limiting("reel download"):
+                logger.info(f"Retrying reel download after network error for {reel_url}")
                 return self.download_reel(reel_url, output_dir)
             return None
         except Exception as e:
@@ -291,7 +315,7 @@ class InstagramDownloader:
                     try:
                         subprocess.run([
                             'ffmpeg', '-i', output_file_path, '-q:a', '0', '-map', 'a', output_audio_path, '-y'
-                        ], check=True, capture_output=True)
+                        ], check=True, capture_output=True, timeout=DEFAULT_TIMEOUT)
                     except Exception as e:
                         logger.error(f"Error extracting audio from story: {e}")
                         output_audio_path = None
@@ -315,6 +339,12 @@ class InstagramDownloader:
                 logger.info(f"Retrying story download for {story_url}")
                 return self.download_story(story_url, output_dir)
             return None
+        except (RequestException, Timeout, ConnectionError, ReadTimeoutError, ProtocolError) as e:
+            logger.error(f"Network error downloading Instagram story: {e}")
+            if self._handle_rate_limiting("story download"):
+                logger.info(f"Retrying story download after network error for {story_url}")
+                return self.download_story(story_url, output_dir)
+            return None
         except Exception as e:
             logger.error(f"Error downloading Instagram story: {e}")
             return None
@@ -333,8 +363,8 @@ class InstagramDownloader:
             # Get profile pic URL
             profile_pic_url = profile.profile_pic_url
             
-            # Download profile pic
-            response = requests.get(profile_pic_url)
+            # Download profile pic with timeout
+            response = requests.get(profile_pic_url, timeout=DEFAULT_TIMEOUT)
             if response.status_code != 200:
                 logger.error(f"Failed to download profile pic: {response.status_code}")
                 return None
@@ -358,6 +388,12 @@ class InstagramDownloader:
                 logger.info(f"Retrying profile download for {profile_url}")
                 return self.download_profile_pic(profile_url, output_dir)
             return None
+        except (RequestException, Timeout, ConnectionError, ReadTimeoutError, ProtocolError) as e:
+            logger.error(f"Network error downloading Instagram profile picture: {e}")
+            if self._handle_rate_limiting("profile download"):
+                logger.info(f"Retrying profile download after network error for {profile_url}")
+                return self.download_profile_pic(profile_url, output_dir)
+            return None
         except Exception as e:
             logger.error(f"Error downloading Instagram profile picture: {e}")
             return None
@@ -370,22 +406,28 @@ class InstagramDownloadService:
     
     def download_from_url(self, url, user_id, download_dir):
         """Download content from Instagram URL"""
-        # Create user download directory
-        user_download_dir = create_download_dir(download_dir, user_id)
-        
-        # Clean URL (remove tracking parameters)
-        url = url.split("?")[0] if "?" in url else url
-        
-        # Determine content type from URL
-        if '/p/' in url:
-            return self.downloader.download_post(url, user_download_dir)
-        elif '/reel/' in url:
-            return self.downloader.download_reel(url, user_download_dir)
-        elif '/stories/' in url:
-            return self.downloader.download_story(url, user_download_dir)
-        else:
-            # Assume it's a profile URL
-            return self.downloader.download_profile_pic(url, user_download_dir)
+        try:
+            # Create user download directory
+            user_download_dir = create_download_dir(download_dir, user_id)
+            
+            # Clean URL (remove tracking parameters)
+            url = url.split("?")[0] if "?" in url else url
+            
+            logger.info(f"Processing Instagram URL: {url}")
+            
+            # Determine content type from URL
+            if '/p/' in url:
+                return self.downloader.download_post(url, user_download_dir)
+            elif '/reel/' in url:
+                return self.downloader.download_reel(url, user_download_dir)
+            elif '/stories/' in url:
+                return self.downloader.download_story(url, user_download_dir)
+            else:
+                # Assume it's a profile URL
+                return self.downloader.download_profile_pic(url, user_download_dir)
+        except Exception as e:
+            logger.error(f"Error in download_from_url: {e}")
+            return None
     
     def convert_to_mp3(self, video_path, output_dir=None):
         """Convert video to MP3 audio"""
@@ -398,7 +440,7 @@ class InstagramDownloadService:
         try:
             subprocess.run([
                 'ffmpeg', '-i', video_path, '-q:a', '0', '-map', 'a', output_path, '-y'
-            ], check=True, capture_output=True)
+            ], check=True, capture_output=True, timeout=DEFAULT_TIMEOUT)
             
             return output_path
         except Exception as e:
