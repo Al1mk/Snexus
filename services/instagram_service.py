@@ -20,12 +20,18 @@ class InstagramDownloader:
             save_metadata=False,
             compress_json=False
         )
+        # Set a user agent to avoid rate limiting
+        self.loader.context.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        # Add a small delay between requests to avoid rate limiting
+        self.loader.context.sleep = True
     
     def download_post(self, post_url, output_dir):
         """Download Instagram post (photo or video)"""
         try:
             # Extract shortcode from URL
             shortcode = post_url.split("/p/")[1].split("/")[0]
+            if "?" in shortcode:
+                shortcode = shortcode.split("?")[0]
             
             # Get post by shortcode
             post = instaloader.Post.from_shortcode(self.loader.context, shortcode)
@@ -91,6 +97,10 @@ class InstagramDownloader:
                 # Handle old format URLs
                 shortcode = reel_url.split("/p/")[1].split("/")[0]
             
+            # Remove query parameters if present
+            if "?" in shortcode:
+                shortcode = shortcode.split("?")[0]
+            
             # Get post by shortcode
             post = instaloader.Post.from_shortcode(self.loader.context, shortcode)
             
@@ -118,7 +128,7 @@ class InstagramDownloader:
                     # Use ffmpeg to extract audio
                     try:
                         subprocess.run([
-                            'ffmpeg', '-i', output_video_path, '-q:a', '0', '-map', 'a', output_audio_path
+                            'ffmpeg', '-i', output_video_path, '-q:a', '0', '-map', 'a', output_audio_path, '-y'
                         ], check=True, capture_output=True)
                     except Exception as e:
                         logger.error(f"Error extracting audio from reel: {e}")
@@ -168,7 +178,12 @@ class InstagramDownloader:
                 story_files = [f for f in files if story_id in f]
                 if not story_files:
                     logger.error(f"Story file not found for ID: {story_id}")
-                    return None
+                    # Try to get the most recent story instead
+                    if files:
+                        story_files = [files[0]]
+                        logger.info(f"Using most recent story instead: {story_files[0]}")
+                    else:
+                        return None
                 
                 story_file = story_files[0]
                 story_path = os.path.join(story_dir, story_file)
@@ -192,7 +207,7 @@ class InstagramDownloader:
                     # Use ffmpeg to extract audio
                     try:
                         subprocess.run([
-                            'ffmpeg', '-i', output_file_path, '-q:a', '0', '-map', 'a', output_audio_path
+                            'ffmpeg', '-i', output_file_path, '-q:a', '0', '-map', 'a', output_audio_path, '-y'
                         ], check=True, capture_output=True)
                     except Exception as e:
                         logger.error(f"Error extracting audio from story: {e}")
@@ -217,6 +232,8 @@ class InstagramDownloader:
         try:
             # Extract username from URL
             username = profile_url.strip('/').split('/')[-1]
+            if "?" in username:
+                username = username.split("?")[0]
             
             # Get profile
             profile = instaloader.Profile.from_username(self.loader.context, username)
@@ -260,6 +277,9 @@ class InstagramDownloadService:
         # Create user download directory
         user_download_dir = create_download_dir(download_dir, user_id)
         
+        # Clean URL (remove tracking parameters)
+        url = url.split("?")[0] if "?" in url else url
+        
         # Determine content type from URL
         if '/p/' in url:
             return self.downloader.download_post(url, user_download_dir)
@@ -281,7 +301,7 @@ class InstagramDownloadService:
         
         try:
             subprocess.run([
-                'ffmpeg', '-i', video_path, '-q:a', '0', '-map', 'a', output_path
+                'ffmpeg', '-i', video_path, '-q:a', '0', '-map', 'a', output_path, '-y'
             ], check=True, capture_output=True)
             
             return output_path

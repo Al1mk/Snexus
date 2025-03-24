@@ -77,6 +77,9 @@ async def process_instagram_url(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return
     
+    # Clean URL (remove tracking parameters)
+    url = url.split("?")[0] if "?" in url else url
+    
     # Determine content type from URL
     content_type = "post"  # Default
     if '/p/' in url:
@@ -184,7 +187,7 @@ async def process_instagram_url(update: Update, context: ContextTypes.DEFAULT_TY
                 )
             
             # Send audio if available
-            if 'audio_path' in result and result['audio_path']:
+            if 'audio_path' in result and result['audio_path'] and os.path.exists(result['audio_path']):
                 with open(result['audio_path'], 'rb') as audio_file:
                     await update.message.reply_audio(
                         audio=audio_file,
@@ -240,7 +243,7 @@ async def process_instagram_url(update: Update, context: ContextTypes.DEFAULT_TY
                     )
                 
                 # Send audio if available
-                if result['audio_path']:
+                if result['audio_path'] and os.path.exists(result['audio_path']):
                     with open(result['audio_path'], 'rb') as audio_file:
                         await update.message.reply_audio(
                             audio=audio_file,
