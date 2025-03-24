@@ -1,11 +1,8 @@
 import os
 import sys
 import logging
-
-# Add the project root directory to the Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from dotenv import load_dotenv
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from services.instagram_service import InstagramDownloadService
 
 # Setup logging
@@ -29,10 +26,10 @@ def test_instagram_download():
     
     # Test URLs
     test_urls = [
+        # Reel URL (the one that was failing)
+        "https://www.instagram.com/reel/C4FYWpGOUAP/",
         # Post URL
         "https://www.instagram.com/p/C4Hl1-xvRVn/",
-        # Reel URL
-        "https://www.instagram.com/reel/C4FYWpGOUAP/",
         # Profile URL
         "https://www.instagram.com/instagram/"
     ]

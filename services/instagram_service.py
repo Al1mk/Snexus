@@ -4,7 +4,13 @@ import instaloader
 import requests
 import tempfile
 import subprocess
+import time
+import random
 from utils.helpers import sanitize_filename, create_download_dir
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +30,62 @@ class InstagramDownloader:
         self.loader.context.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         # Add a small delay between requests to avoid rate limiting
         self.loader.context.sleep = True
+        # Increase delay between requests to avoid rate limiting
+        self.loader.context.sleep_between_requests = 5
+        # Set maximum number of connection attempts
+        self.loader.context.max_connection_attempts = 3
+        
+        # Try to authenticate with Instagram if credentials are available
+        self._authenticate()
+        
+        # Track failed attempts to implement exponential backoff
+        self.failed_attempts = 0
+        self.max_retries = 3
+    
+    def _authenticate(self):
+        """Authenticate with Instagram using credentials from environment variables"""
+        try:
+            username = os.getenv('INSTAGRAM_USERNAME')
+            password = os.getenv('INSTAGRAM_PASSWORD')
+            
+            if username and password:
+                logger.info(f"Attempting to login to Instagram as {username}")
+                self.loader.login(username, password)
+                logger.info("Instagram login successful")
+                
+                # Save session for future use
+                session_file = os.getenv('INSTAGRAM_SESSION_FILE', 'instagram_session')
+                self.loader.save_session_to_file(session_file)
+            else:
+                # Try to load session if available
+                session_file = os.getenv('INSTAGRAM_SESSION_FILE', 'instagram_session')
+                if os.path.exists(session_file):
+                    logger.info(f"Loading Instagram session from {session_file}")
+                    try:
+                        self.loader.load_session_from_file(username, session_file)
+                        logger.info("Instagram session loaded successfully")
+                    except Exception as e:
+                        logger.warning(f"Failed to load Instagram session: {e}")
+                else:
+                    logger.warning("No Instagram credentials or session file found. Some downloads may fail due to rate limiting.")
+        except Exception as e:
+            logger.error(f"Instagram authentication error: {e}")
+            logger.warning("Continuing without authentication. Some downloads may fail.")
+    
+    def _handle_rate_limiting(self, operation_name):
+        """Handle rate limiting with exponential backoff"""
+        if self.failed_attempts > 0:
+            # Calculate backoff time with jitter
+            backoff_time = min(30, 2 ** self.failed_attempts) + random.uniform(0, 1)
+            logger.warning(f"Rate limiting detected for {operation_name}. Backing off for {backoff_time:.2f} seconds (attempt {self.failed_attempts}/{self.max_retries})")
+            time.sleep(backoff_time)
+        
+        self.failed_attempts += 1
+        return self.failed_attempts <= self.max_retries
+    
+    def _reset_rate_limiting(self):
+        """Reset rate limiting counter after successful operation"""
+        self.failed_attempts = 0
     
     def download_post(self, post_url, output_dir):
         """Download Instagram post (photo or video)"""
@@ -54,6 +116,9 @@ class InstagramDownloader:
                     with open(video_path, 'rb') as src, open(output_video_path, 'wb') as dst:
                         dst.write(src.read())
                     
+                    # Reset rate limiting counter after success
+                    self._reset_rate_limiting()
+                    
                     return {
                         'type': 'video',
                         'file_path': output_video_path,
@@ -73,6 +138,9 @@ class InstagramDownloader:
                     with open(image_path, 'rb') as src, open(output_image_path, 'wb') as dst:
                         dst.write(src.read())
                     
+                    # Reset rate limiting counter after success
+                    self._reset_rate_limiting()
+                    
                     return {
                         'type': 'photo',
                         'file_path': output_image_path,
@@ -82,6 +150,12 @@ class InstagramDownloader:
                         'date': post.date_local.strftime('%Y-%m-%d %H:%M:%S')
                     }
             
+            return None
+        except instaloader.exceptions.ConnectionException as e:
+            logger.error(f"Connection error downloading Instagram post: {e}")
+            if self._handle_rate_limiting("post download"):
+                logger.info(f"Retrying post download for {post_url}")
+                return self.download_post(post_url, output_dir)
             return None
         except Exception as e:
             logger.error(f"Error downloading Instagram post: {e}")
@@ -134,6 +208,9 @@ class InstagramDownloader:
                         logger.error(f"Error extracting audio from reel: {e}")
                         output_audio_path = None
                     
+                    # Reset rate limiting counter after success
+                    self._reset_rate_limiting()
+                    
                     return {
                         'type': 'reel',
                         'file_path': output_video_path,
@@ -144,6 +221,12 @@ class InstagramDownloader:
                         'date': post.date_local.strftime('%Y-%m-%d %H:%M:%S')
                     }
             
+            return None
+        except instaloader.exceptions.ConnectionException as e:
+            logger.error(f"Connection error downloading Instagram reel: {e}")
+            if self._handle_rate_limiting("reel download"):
+                logger.info(f"Retrying reel download for {reel_url}")
+                return self.download_reel(reel_url, output_dir)
             return None
         except Exception as e:
             logger.error(f"Error downloading Instagram reel: {e}")
@@ -213,6 +296,9 @@ class InstagramDownloader:
                         logger.error(f"Error extracting audio from story: {e}")
                         output_audio_path = None
                 
+                # Reset rate limiting counter after success
+                self._reset_rate_limiting()
+                
                 return {
                     'type': 'story',
                     'file_path': output_file_path,
@@ -222,6 +308,12 @@ class InstagramDownloader:
                     'date': ''  # Stories don't have accessible date info
                 }
             
+            return None
+        except instaloader.exceptions.ConnectionException as e:
+            logger.error(f"Connection error downloading Instagram story: {e}")
+            if self._handle_rate_limiting("story download"):
+                logger.info(f"Retrying story download for {story_url}")
+                return self.download_story(story_url, output_dir)
             return None
         except Exception as e:
             logger.error(f"Error downloading Instagram story: {e}")
@@ -252,19 +344,23 @@ class InstagramDownloader:
             with open(output_file_path, 'wb') as f:
                 f.write(response.content)
             
+            # Reset rate limiting counter after success
+            self._reset_rate_limiting()
+            
             return {
                 'type': 'profile',
                 'file_path': output_file_path,
-                'username': username,
-                'full_name': profile.full_name,
-                'biography': profile.biography,
-                'followers': profile.followers,
-                'followees': profile.followees
+                'owner': username
             }
+        except instaloader.exceptions.ConnectionException as e:
+            logger.error(f"Connection error downloading Instagram profile picture: {e}")
+            if self._handle_rate_limiting("profile download"):
+                logger.info(f"Retrying profile download for {profile_url}")
+                return self.download_profile_pic(profile_url, output_dir)
+            return None
         except Exception as e:
             logger.error(f"Error downloading Instagram profile picture: {e}")
             return None
-
 
 class InstagramDownloadService:
     """Service for downloading content from Instagram"""
