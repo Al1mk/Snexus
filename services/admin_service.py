@@ -3,7 +3,7 @@ import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from models.models import User, RequiredChannel
-from config.config import ADMIN_IDS
+from config.config import ADMIN_USER_IDS as ADMIN_IDS
 import time
 
 logger = logging.getLogger(__name__)

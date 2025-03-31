@@ -2,7 +2,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 import logging
 from models.models import User, RequiredChannel
-from config.config import ADMIN_IDS
+from config.config import ADMIN_USER_IDS as ADMIN_IDS
 from services.admin_service import AdminService
 
 logger = logging.getLogger(__name__)

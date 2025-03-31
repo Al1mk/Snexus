@@ -18,7 +18,7 @@ from handlers.youtube_handler import youtube_handler, process_youtube_url
 from handlers.instagram_handler import instagram_handler, process_instagram_url
 from handlers.playlist_handler import playlist_handler, create_playlist_handler, view_playlists_handler
 from handlers.vip_handler import vip_handler, process_vip_payment
-from handlers.admin_handler import admin_handler, broadcast_handler, channel_handler, process_broadcast
+from handlers.admin_handler import admin_handler, process_admin_message
 
 # Setup logging
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -596,8 +596,9 @@ def main():
     
     # Admin handlers
     application.add_handler(CommandHandler("admin", admin_handler))
-    application.add_handler(CommandHandler("broadcast", broadcast_handler))
-    application.add_handler(CommandHandler("channels", channel_handler))
+    # Remove broadcast and channels handlers as they don't exist
+    # application.add_handler(CommandHandler("broadcast", broadcast_handler))
+    # application.add_handler(CommandHandler("channels", channel_handler))
     
     # Callback query handler for button clicks
     application.add_handler(CallbackQueryHandler(callback_handler))
